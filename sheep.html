@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Crowd Management: Herding Chaos</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #222; }
+    canvas { display: block; margin: auto; background: #eee; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- Game Settings ---
+    const NUM_SHEEP = 10;               // Total number of sheep to herd initially
+    const SHEEP_ATTRACTION_RADIUS = 100;  // How close you need to be for them to follow you
+    const SHEEP_SPEED = 1.5;            // Speed when wandering
+    const SHEEP_FOLLOW_SPEED = 2.0;     // Speed when following you
+    const PLAYER_SPEED = 3;             // Your movement speed
+    const TARGET_ZONE = {               // Safe zone rectangle (bottom-right area)
+      x: 450,
+      y: 450,
+      width: 140,
+      height: 140
+    };
+
+    // --- Global Flags ---
+    let gameOver = false;
+    let gameLost = false; // True if all sheep are eaten
+
+    // --- Player Object (Cattle Dog) ---
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      radius: 15
+    };
+
+    // --- Wolf Object ---
+    const wolf = {
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      radius: 15,
+      speed: 2.5,
+      vx: (Math.random() - 0.5) * 2.5,
+      vy: (Math.random() - 0.5) * 2.5
+    };
+
+    // --- Array to Hold Sheep (NPCs) ---
+    const sheep = [];
+
+    // --- Keyboard State ---
+    const keys = { w: false, a: false, s: false, d: false };
+
+    // --- Create Sheep ---
+    function initSheep() {
+      sheep.length = 0;
+      for (let i = 0; i < NUM_SHEEP; i++) {
+        const s = {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radius: 8,
+          vx: (Math.random() - 0.5) * SHEEP_SPEED,
+          vy: (Math.random() - 0.5) * SHEEP_SPEED,
+          inTarget: false
+        };
+        sheep.push(s);
+      }
+    }
+
+    // --- Keyboard Event Listeners ---
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'w' || e.key === 'W') keys.w = true;
+      if (e.key === 'a' || e.key === 'A') keys.a = true;
+      if (e.key === 's' || e.key === 'S') keys.s = true;
+      if (e.key === 'd' || e.key === 'D') keys.d = true;
+    });
+
+    document.addEventListener('keyup', function(e) {
+      if (e.key === 'w' || e.key === 'W') keys.w = false;
+      if (e.key === 'a' || e.key === 'A') keys.a = false;
+      if (e.key === 's' || e.key === 'S') keys.s = false;
+      if (e.key === 'd' || e.key === 'D') keys.d = false;
+    });
+
+    // --- Update Game State ---
+    function update() {
+      if (gameOver) return;
+
+      // Move the player (cattle dog)
+      if (keys.w && player.y - player.radius > 0) player.y -= PLAYER_SPEED;
+      if (keys.s && player.y + player.radius < canvas.height) player.y += PLAYER_SPEED;
+      if (keys.a && player.x - player.radius > 0) player.x -= PLAYER_SPEED;
+      if (keys.d && player.x + player.radius < canvas.width) player.x += PLAYER_SPEED;
+
+      // Update each sheep
+      sheep.forEach(s => {
+        // Check if the sheep is inside the safe zone
+        if (
+          s.x > TARGET_ZONE.x &&
+          s.x < TARGET_ZONE.x + TARGET_ZONE.width &&
+          s.y > TARGET_ZONE.y &&
+          s.y < TARGET_ZONE.y + TARGET_ZONE.height
+        ) {
+          s.inTarget = true;
+          // Once safe, stop moving
+          s.vx = 0;
+          s.vy = 0;
+        } else {
+          s.inTarget = false;
+          // If near the player, sheep follow the cattle dog
+          const dx = player.x - s.x;
+          const dy = player.y - s.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < SHEEP_ATTRACTION_RADIUS) {
+            const angle = Math.atan2(dy, dx);
+            s.vx = Math.cos(angle) * SHEEP_FOLLOW_SPEED;
+            s.vy = Math.sin(angle) * SHEEP_FOLLOW_SPEED;
+          }
+        }
+        // Update sheep position
+        s.x += s.vx;
+        s.y += s.vy;
+        // Bounce off canvas edges when wandering
+        if (!s.inTarget) {
+          if (s.x - s.radius < 0 || s.x + s.radius > canvas.width) {
+            s.vx = -s.vx;
+          }
+          if (s.y - s.radius < 0 || s.y + s.radius > canvas.height) {
+            s.vy = -s.vy;
+          }
+        }
+      });
+
+      // --- Wolf Behavior ---
+      // Wolf chases the nearest sheep that is not safe
+      let targetSheep = null;
+      let minDist = Infinity;
+      sheep.forEach(s => {
+        if (!s.inTarget) {
+          const dx = s.x - wolf.x;
+          const dy = s.y - wolf.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < minDist) {
+            minDist = d;
+            targetSheep = s;
+          }
+        }
+      });
+      if (targetSheep) {
+        const angle = Math.atan2(targetSheep.y - wolf.y, targetSheep.x - wolf.x);
+        wolf.vx = Math.cos(angle) * wolf.speed;
+        wolf.vy = Math.sin(angle) * wolf.speed;
+      } else {
+        // If no unsafe sheep, add slight random wandering
+        wolf.vx += (Math.random() - 0.5) * 0.1;
+        wolf.vy += (Math.random() - 0.5) * 0.1;
+      }
+      // Update wolf position
+      wolf.x += wolf.vx;
+      wolf.y += wolf.vy;
+      // Bounce wolf off edges
+      if (wolf.x - wolf.radius < 0 || wolf.x + wolf.radius > canvas.width) {
+        wolf.vx = -wolf.vx;
+      }
+      if (wolf.y - wolf.radius < 0 || wolf.y + wolf.radius > canvas.height) {
+        wolf.vy = -wolf.vy;
+      }
+
+      // --- Collision: Wolf eats sheep not in the safe zone ---
+      for (let i = sheep.length - 1; i >= 0; i--) {
+        const s = sheep[i];
+        if (!s.inTarget) {
+          const dx = s.x - wolf.x;
+          const dy = s.y - wolf.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < wolf.radius + s.radius) {
+            // Sheep is eaten
+            sheep.splice(i, 1);
+          }
+        }
+      }
+
+      // --- Check End Conditions ---
+      if (sheep.length === 0) {
+        gameOver = true;
+        gameLost = true;
+      } else if (sheep.every(s => s.inTarget)) {
+        gameOver = true;
+        gameLost = false;
+      }
+    }
+
+    // --- Draw Everything ---
+    function draw() {
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw the safe zone
+      ctx.fillStyle = 'lightgreen';
+      ctx.fillRect(TARGET_ZONE.x, TARGET_ZONE.y, TARGET_ZONE.width, TARGET_ZONE.height);
+
+      // Draw the cattle dog (player)
+      ctx.drawImage(dogImg, player.x - 15, player.y - 15, 30, 30);
+
+      // Draw each sheep
+      sheep.forEach(s => {
+        ctx.drawImage(sheepImg, s.x - 8, s.y - 8, 16, 16);
+      });
+
+      // Draw the wolf
+      ctx.drawImage(wolfImg, wolf.x - wolf.radius, wolf.y - wolf.radius, wolf.radius * 2, wolf.radius * 2);
+
+      // Display instructions and score
+      ctx.fillStyle = 'black';
+      ctx.font = '16px Arial';
+      ctx.fillText('Herd all the sheep into the safe zone. The wolf will eat any stray sheep!', 10, 20);
+      ctx.fillText('Sheep Alive: ' + sheep.length, 10, 40);
+
+      // Display end-of-game message
+      if (gameOver) {
+        ctx.fillStyle = gameLost ? 'red' : 'blue';
+        ctx.font = '48px Arial';
+        if (gameLost) {
+          ctx.fillText('All sheep eaten!', canvas.width / 2 - 150, canvas.height / 2);
+        } else {
+          ctx.fillText('Victory!', canvas.width / 2 - 100, canvas.height / 2 - 20);
+          ctx.font = '32px Arial';
+          ctx.fillText('Sheep remaining: ' + sheep.length, canvas.width / 2 - 120, canvas.height / 2 + 20);
+        }
+      }
+    }
+
+    // --- Main Game Loop ---
+    function gameLoop() {
+      update();
+      draw();
+      if (!gameOver) {
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    // --- SVG Icons ---
+    // Cattle Dog SVG (Player)
+    const dogSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="30" fill="#007BFF"/>
+      <path d="M12,20 Q22,2 32,20" fill="#0056b3"/>
+      <path d="M32,20 Q42,2 52,20" fill="#0056b3"/>
+      <circle cx="24" cy="24" r="4" fill="#fff"/>
+      <circle cx="40" cy="24" r="4" fill="#fff"/>
+      <path d="M22,40 Q32,50 42,40" stroke="#fff" stroke-width="3" fill="none"/>
+    </svg>`;
+
+    // Sheep SVG (NPC)
+    const sheepSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+      <ellipse cx="32" cy="38" rx="18" ry="12" fill="#FF4136"/>
+      <circle cx="22" cy="28" r="6" fill="#FF4136"/>
+      <circle cx="20" cy="26" r="1.5" fill="#fff"/>
+      <circle cx="24" cy="26" r="1.5" fill="#fff"/>
+    </svg>`;
+
+    // Wolf SVG
+    const wolfSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+      <circle cx="32" cy="32" r="30" fill="grey"/>
+      <polygon points="12,20 22,5 32,20" fill="darkgrey"/>
+      <polygon points="32,20 42,5 52,20" fill="darkgrey"/>
+      <circle cx="24" cy="28" r="4" fill="#fff"/>
+      <circle cx="40" cy="28" r="4" fill="#fff"/>
+      <path d="M22,40 Q32,50 42,40" stroke="#fff" stroke-width="3" fill="none"/>
+    </svg>`;
+
+    // --- Load Images from SVG Data ---
+    const dogImg = new Image();
+    const sheepImg = new Image();
+    const wolfImg = new Image();
+    let imagesLoaded = 0;
+
+    function checkImagesLoaded() {
+      imagesLoaded++;
+      if (imagesLoaded === 3) {
+        initSheep();
+        gameLoop();
+      }
+    }
+
+    dogImg.onload = checkImagesLoaded;
+    sheepImg.onload = checkImagesLoaded;
+    wolfImg.onload = checkImagesLoaded;
+
+    dogImg.src = "data:image/svg+xml;utf8," + encodeURIComponent(dogSvg);
+    sheepImg.src = "data:image/svg+xml;utf8," + encodeURIComponent(sheepSvg);
+    wolfImg.src = "data:image/svg+xml;utf8," + encodeURIComponent(wolfSvg);
+  </script>
+</body>
+</html>
