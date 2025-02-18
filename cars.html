@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Top Down Car Racing Game – Improved AI</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #222; }
+    canvas { display: block; background: #444; }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+(function(){
+  // --- SETUP CANVAS ---
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  // Global state.
+  let keys = {};
+  let raceFinished = false;
+  let winner = null;
+  let bullets = []; // global bullet array
+
+  // --- PHRASES ARRAY (100 kid‑friendly phrases) ---
+  const phrases = [
+    "Watch it, buddy!",
+    "Hey, slow down!",
+    "Ouch, that hurt!",
+    "No fair!",
+    "Cut it out!",
+    "I'm rubber, you're glue!",
+    "Better watch where you're going!",
+    "Get off my bumper!",
+    "I'm not made of steel!",
+    "Chill out, pal!",
+    "Don't be reckless!",
+    "Watch your speed!",
+    "Take it easy!",
+    "Not cool!",
+    "Keep it down!",
+    "What's the rush?",
+    "Boom, head-on!",
+    "Oops, sorry!",
+    "That smarts!",
+    "Yikes!",
+    "Bump, bump!",
+    "Whoops!",
+    "My bad!",
+    "Easy does it!",
+    "Swerve!",
+    "Watch the road!",
+    "Look out!",
+    "Stop that!",
+    "Honk if you're mad!",
+    "I'm telling!",
+    "Car trouble!",
+    "Boomerang!",
+    "You got served!",
+    "Nice try!",
+    "Road rage!",
+    "Oopsie daisy!",
+    "Crash!",
+    "Bam!",
+    "Whomp!",
+    "I'm out!",
+    "No way!",
+    "Oops!",
+    "Bumpy ride!",
+    "Slow down!",
+    "Turn it down!",
+    "Back off!",
+    "Move it!",
+    "Watch your step!",
+    "Time out!",
+    "Yowza!",
+    "I blinked!",
+    "Stop!",
+    "That's my lane!",
+    "Road hog!",
+    "Cut me some slack!",
+    "Hey, buddy!",
+    "Don't cut me off!",
+    "My bumper's hurting!",
+    "That's it!",
+    "You missed!",
+    "Bump off!",
+    "Too close!",
+    "Watch it!",
+    "Oops, again!",
+    "Give me space!",
+    "Mind your mirror!",
+    "Get off my tail!",
+    "Back up!",
+    "Scram!",
+    "Mind your manners!",
+    "You drive funny!",
+    "No collisions!",
+    "Bump-a-lump!",
+    "Not again!",
+    "Fender bender!",
+    "Not cool, dude!",
+    "What a crash!",
+    "I didn't sign up for this!",
+    "Whoa!",
+    "Hey, watch it!",
+    "Mind the gap!",
+    "Steer clear!",
+    "Boom, sorry!",
+    "Spare me!",
+    "That's rude!",
+    "Stay in your lane!",
+    "Back off, buddy!",
+    "I'm rubber!",
+    "That's enough!",
+    "Knock it off!",
+    "Oh snap!",
+    "You're on my tail!",
+    "Keep your distance!",
+    "I'm coming through!",
+    "Excuse me!",
+    "Cruise control!",
+    "No fender benders!",
+    "Too close for comfort!",
+    "Drive safe!",
+    "Better buckle up!"
+  ];
+
+  // Helper: get a random phrase.
+  function randomPhrase() {
+    return phrases[Math.floor(Math.random() * phrases.length)];
+  }
+
+  // --- TRACK GENERATION ---
+  // Create a donut-shaped track with 24 segments and a wide road.
+  function generateTrack(){
+    const segments = 24;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const baseRadius = Math.min(cx, cy) * 0.8;
+    const noiseMax = baseRadius * 0.08;
+    const trackWidth = 120;  // Much wider road!
+    let outerPoints = [];
+    let innerPoints = [];
+    let centerlinePoints = [];
+
+    for(let i = 0; i < segments; i++){
+      let angle = i * 2 * Math.PI / segments;
+      let noise = (Math.random() * 2 - 1) * noiseMax;
+      let outerR = baseRadius + noise;
+      let innerR = outerR - trackWidth;
+      outerPoints.push({
+        x: cx + outerR * Math.cos(angle),
+        y: cy + outerR * Math.sin(angle)
+      });
+      innerPoints.push({
+        x: cx + innerR * Math.cos(angle),
+        y: cy + innerR * Math.sin(angle)
+      });
+      let midR = (outerR + innerR) / 2;
+      centerlinePoints.push({
+        x: cx + midR * Math.cos(angle),
+        y: cy + midR * Math.sin(angle)
+      });
+    }
+
+    let trackPath = new Path2D();
+    trackPath.moveTo(outerPoints[0].x, outerPoints[0].y);
+    for(let i = 1; i < segments; i++){
+      trackPath.lineTo(outerPoints[i].x, outerPoints[i].y);
+    }
+    trackPath.closePath();
+    trackPath.moveTo(innerPoints[0].x, innerPoints[0].y);
+    for(let i = 1; i < segments; i++){
+      trackPath.lineTo(innerPoints[segments - i].x, innerPoints[segments - i].y);
+    }
+    trackPath.closePath();
+
+    return {
+      trackPath: trackPath,
+      centerlinePoints: centerlinePoints,
+      cx: cx,
+      cy: cy,
+      trackWidth: trackWidth,
+      baseRadius: baseRadius
+    };
+  }
+  const track = generateTrack();
+
+  // --- WATER FEATURE GENERATION FUNCTION ---
+  // Generates an irregular water shape given a center and a base radius.
+  function generateWaterFeature(cx, cy, baseRadius) {
+    const segments = 30;
+    const waterNoise = baseRadius * 0.1;
+    let waterPath = new Path2D();
+    for(let i = 0; i <= segments; i++){
+      let angle = i * 2 * Math.PI / segments;
+      let noise = (Math.random() * 2 - 1) * waterNoise;
+      let r = baseRadius + noise;
+      let x = cx + r * Math.cos(angle);
+      let y = cy + r * Math.sin(angle);
+      if(i === 0){
+        waterPath.moveTo(x, y);
+      } else {
+        waterPath.lineTo(x, y);
+      }
+    }
+    waterPath.closePath();
+    return waterPath;
+  }
+
+  // --- WATER FEATURES ---
+  // Generate a random number (between 1 and 10) of small water features.
+  let waterFeatures = [];
+  const numWaterFeatures = Math.floor(Math.random() * 10) + 1;
+  for(let i = 0; i < numWaterFeatures; i++){
+    let wfCenter;
+    do {
+      wfCenter = {
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height
+      };
+    } while (!ctx.isPointInPath(track.trackPath, wfCenter.x, wfCenter.y));
+    let wfBaseRadius = 20 + Math.random() * 20; // 20 to 40 pixels.
+    let wfPath = generateWaterFeature(wfCenter.x, wfCenter.y, wfBaseRadius);
+    waterFeatures.push({ path: wfPath, center: wfCenter, radius: wfBaseRadius });
+  }
+
+  // --- BOTTOMLESS PITS ---
+  // Generate 3 bottomless pits that cause instant death.
+  let bottomlessPits = [];
+  const numPits = 3;
+  for(let i = 0; i < numPits; i++){
+    let pitCenter;
+    do {
+      pitCenter = {
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height
+      };
+    } while (!ctx.isPointInPath(track.trackPath, pitCenter.x, pitCenter.y));
+    let pitBaseRadius = 30 + Math.random() * 20; // 30 to 50 pixels.
+    let pitPath = generateWaterFeature(pitCenter.x, pitCenter.y, pitBaseRadius);
+    bottomlessPits.push({ path: pitPath, center: pitCenter, radius: pitBaseRadius });
+  }
+
+  // --- CAR OBJECT ---
+  // Cars are drawn as polygons with a pointed front.
+  const carWidth = 10;
+  const carHeight = 20;
+  function Car(x, y, angle, color, isPlayer){
+    this.x = x;
+    this.y = y;
+    this.angle = angle;  // In radians; 0 means facing right.
+    this.speed = 0;
+    this.color = color;
+    this.isPlayer = isPlayer;
+    this.targetIndex = 0; // For AI
+    this.lapProgress = 0;
+    this.prevAngle = null;
+    this.acceleration = 0.2;
+    this.maxSpeed = 4;
+    this.friction = 0.05;
+    this.turnSpeed = 0.04;
+    this.width = carWidth;
+    this.height = carHeight;
+    this.aiOffset = 0;
+    this.chatBubble = "";
+    this.chatBubbleTimer = 0;
+    this.hitCount = 0;
+    this.destroyed = false;
+    this.shootCooldown = 0;
+  }
+
+  // --- AI CAR CREATION ---
+  function createAICar(x, y, angle, color) {
+    let car = new Car(x, y, angle, color, false);
+    car.aiOffset = (Math.random() * 20) - 10;
+    car.turnSpeed *= (0.8 + Math.random() * 0.4);
+    car.acceleration *= (0.8 + Math.random() * 0.4);
+    car.maxSpeed *= (0.9 + Math.random() * 0.2);
+    return car;
+  }
+
+  // --- SETTING UP THE CARS ---
+  let cars = [];
+  let start = track.centerlinePoints[0];
+  let next = track.centerlinePoints[1];
+  let dx = next.x - start.x;
+  let dy = next.y - start.y;
+  let len = Math.hypot(dx, dy);
+  let perp = { x: -dy/len, y: dx/len };
+
+  // Player car (red).
+  cars.push(new Car(
+    start.x + perp.x * (-15),
+    start.y + perp.y * (-15),
+    Math.atan2(dy, dx),
+    'red',
+    true
+  ));
+  // AI cars.
+  cars.push(createAICar(
+    start.x + perp.x * (15),
+    start.y + perp.y * (15),
+    Math.atan2(dy, dx),
+    'blue'
+  ));
+  cars.push(createAICar(
+    start.x + perp.x * (15),
+    start.y + perp.y * (-15),
+    Math.atan2(dy, dx),
+    'yellow'
+  ));
+  cars.push(createAICar(
+    start.x + perp.x * (-15),
+    start.y + perp.y * (15),
+    Math.atan2(dy, dx),
+    'white'
+  ));
+
+  // --- BULLET CONSTANTS ---
+  const bulletSpeed = 7;
+  const bulletLifetime = 120; // frames
+
+  // --- INPUT HANDLING ---
+  window.addEventListener('keydown', function(e){
+    keys[e.key.toLowerCase()] = true;
+  });
+  window.addEventListener('keyup', function(e){
+    keys[e.key.toLowerCase()] = false;
+  });
+
+  // --- COLLISION FUNCTIONS ---
+  function bounce(car1, car2, nx, ny) {
+    let v1x = Math.cos(car1.angle) * car1.speed;
+    let v1y = Math.sin(car1.angle) * car1.speed;
+    let v2x = Math.cos(car2.angle) * car2.speed;
+    let v2y = Math.sin(car2.angle) * car2.speed;
+    let dot1 = v1x * nx + v1y * ny;
+    let dot2 = v2x * nx + v2y * ny;
+    let newV1x = v1x - dot1 * nx + dot2 * nx;
+    let newV1y = v1y - dot1 * ny + dot2 * ny;
+    let newV2x = v2x - dot2 * nx + dot1 * nx;
+    let newV2y = v2y - dot2 * ny + dot1 * ny;
+    newV1x *= 0.8;
+    newV1y *= 0.8;
+    newV2x *= 0.8;
+    newV2y *= 0.8;
+    car1.speed = Math.hypot(newV1x, newV1y);
+    car1.angle = Math.atan2(newV1y, newV1x);
+    car2.speed = Math.hypot(newV2x, newV2y);
+    car2.angle = Math.atan2(newV2y, newV2x);
+    car1.chatBubble = randomPhrase();
+    car1.chatBubbleTimer = 100;
+    car2.chatBubble = randomPhrase();
+    car2.chatBubbleTimer = 100;
+  }
+
+  function resolveCollisions() {
+    const collisionDistance = Math.sqrt(carWidth * carWidth + carHeight * carHeight);
+    for(let i = 0; i < cars.length; i++){
+      for(let j = i+1; j < cars.length; j++){
+        if(cars[i].destroyed || cars[j].destroyed) continue;
+        let dx = cars[j].x - cars[i].x;
+        let dy = cars[j].y - cars[i].y;
+        let dist = Math.hypot(dx, dy);
+        if(dist < collisionDistance && dist > 0) {
+          let overlap = collisionDistance - dist;
+          let nx = dx / dist;
+          let ny = dy / dist;
+          cars[i].x -= nx * overlap/2;
+          cars[i].y -= ny * overlap/2;
+          cars[j].x += nx * overlap/2;
+          cars[j].y += ny * overlap/2;
+          bounce(cars[i], cars[j], nx, ny);
+        }
+      }
+    }
+  }
+
+  // --- MAIN GAME LOOP ---
+  function gameLoop(){
+    update();
+    draw();
+    if(!raceFinished){
+      requestAnimationFrame(gameLoop);
+    }
+  }
+  requestAnimationFrame(gameLoop);
+
+  // --- UPDATE FUNCTION ---
+  function update(){
+    for(let car of cars){
+      if(raceFinished) continue;
+      if(car.destroyed) continue;
+
+      if(car.shootCooldown > 0) car.shootCooldown--;
+
+      if(car.isPlayer){
+        if(keys['w']) { car.speed += car.acceleration; }
+        if(keys['s']) { car.speed -= car.acceleration; }
+        if(keys['a']) { car.angle -= car.turnSpeed * (car.speed / car.maxSpeed); }
+        if(keys['d']) { car.angle += car.turnSpeed * (car.speed / car.maxSpeed); }
+        if(keys[' '] && car.shootCooldown <= 0) {
+          bullets.push({
+            x: car.x,
+            y: car.y,
+            angle: car.angle,
+            speed: bulletSpeed,
+            lifetime: bulletLifetime,
+            shooter: car
+          });
+          car.shootCooldown = 20;
+        }
+      } else {
+        // --- AI LOGIC WITH LOOKAHEAD & PIT AVOIDANCE ---
+        let targetBase = track.centerlinePoints[car.targetIndex];
+        let dxCenter = targetBase.x - track.cx;
+        let dyCenter = targetBase.y - track.cy;
+        let dist = Math.hypot(dxCenter, dyCenter);
+        let normalX = dxCenter / dist;
+        let normalY = dyCenter / dist;
+        let tangentX = -normalY;
+        let tangentY = normalX;
+        // Apply lateral offset.
+        let targetX = targetBase.x + tangentX * car.aiOffset;
+        let targetY = targetBase.y + tangentY * car.aiOffset;
+        // Compute desired angle from current checkpoint.
+        let desiredAngle = Math.atan2(targetY - car.y, targetX - car.x);
+        // Look ahead to the next checkpoint.
+        let nextIndex = (car.targetIndex + 1) % track.centerlinePoints.length;
+        let nextPoint = track.centerlinePoints[nextIndex];
+        let nextDesired = Math.atan2(nextPoint.y - car.y, nextPoint.x - car.x);
+        // Average the two desired angles (by vector summing).
+        let currentVec = { x: Math.cos(desiredAngle), y: Math.sin(desiredAngle) };
+        let nextVec = { x: Math.cos(nextDesired), y: Math.sin(nextDesired) };
+        let avgVec = { x: currentVec.x + nextVec.x, y: currentVec.y + nextVec.y };
+        let avgDesiredAngle = Math.atan2(avgVec.y, avgVec.x);
+        // --- PIT AVOIDANCE ---
+        let avoidVector = { x: 0, y: 0 };
+        const pitAvoidThreshold = 150;
+        for(let pit of bottomlessPits){
+          let dxPit = car.x - pit.center.x;
+          let dyPit = car.y - pit.center.y;
+          let distPit = Math.hypot(dxPit, dyPit);
+          if(distPit < pitAvoidThreshold) {
+            let weight = (pitAvoidThreshold - distPit) / pitAvoidThreshold;
+            avoidVector.x += (dxPit / distPit) * weight;
+            avoidVector.y += (dyPit / distPit) * weight;
+          }
+        }
+        // Combine the averaged desired vector with the avoidance vector.
+        let desiredVec = { x: Math.cos(avgDesiredAngle), y: Math.sin(avgDesiredAngle) };
+        desiredVec.x += avoidVector.x;
+        desiredVec.y += avoidVector.y;
+        let finalDesiredAngle = Math.atan2(desiredVec.y, desiredVec.x);
+        let angleDiff = finalDesiredAngle - car.angle;
+        angleDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+        let safeSpeed = car.maxSpeed * Math.max(Math.cos(angleDiff), 0.3);
+        if(Math.abs(angleDiff) > 0.5){
+          car.speed -= car.acceleration * 2;
+        } else if(car.speed > safeSpeed){
+          car.speed -= car.acceleration * 1.5;
+        } else {
+          car.speed += car.acceleration;
+        }
+        if(angleDiff > 0.05){
+          car.angle += car.turnSpeed;
+        } else if(angleDiff < -0.05){
+          car.angle -= car.turnSpeed;
+        }
+        if(Math.hypot(car.x - targetBase.x, car.y - targetBase.y) < 20){
+          car.targetIndex = (car.targetIndex + 1) % track.centerlinePoints.length;
+          car.aiOffset = (Math.random() * 20) - 10;
+        }
+        // --- AI SHOOTING ---
+        let nearest = null, nearestDist = Infinity;
+        for(let other of cars){
+          if(other === car || other.destroyed) continue;
+          let d = Math.hypot(car.x - other.x, car.y - other.y);
+          if(d < nearestDist){
+            nearestDist = d;
+            nearest = other;
+          }
+        }
+        if(nearest && car.shootCooldown <= 0 && Math.random() < 0.005){
+          let targetAngle = Math.atan2(nearest.y - car.y, nearest.x - car.x);
+          targetAngle += (Math.random() * 0.4 - 0.2);
+          bullets.push({
+            x: car.x,
+            y: car.y,
+            angle: targetAngle,
+            speed: bulletSpeed,
+            lifetime: bulletLifetime,
+            shooter: car
+          });
+          car.shootCooldown = 40;
+        }
+      }
+
+      // Apply friction.
+      if(car.speed > 0){
+        car.speed -= car.friction;
+        if(car.speed < 0) car.speed = 0;
+      } else if(car.speed < 0){
+        car.speed += car.friction;
+        if(car.speed > 0) car.speed = 0;
+      }
+      if(car.speed > car.maxSpeed) car.speed = car.maxSpeed;
+      if(car.speed < -car.maxSpeed/2) car.speed = -car.maxSpeed/2;
+
+      let newX = car.x + Math.cos(car.angle) * car.speed;
+      let newY = car.y + Math.sin(car.angle) * car.speed;
+
+      // --- PIT COLLISION: Instant death if touching a bottomless pit.
+      let inPit = false;
+      for(let pit of bottomlessPits){
+        if(ctx.isPointInPath(pit.path, newX, newY)){
+          inPit = true;
+          break;
+        }
+      }
+      if(inPit){
+        car.destroyed = true;
+        car.chatBubble = "FALL!";
+        car.chatBubbleTimer = 100;
+      } else {
+        // --- WATER COLLISION: Slow the car down, but don’t stop it.
+        let inWater = false;
+        for(let wf of waterFeatures){
+          if(ctx.isPointInPath(wf.path, newX, newY)){
+            inWater = true;
+            break;
+          }
+        }
+        if(inWater){
+          car.speed *= 0.3;
+          car.x = newX;
+          car.y = newY;
+        } else {
+          car.x = newX;
+          car.y = newY;
+          let onTrack = ctx.isPointInPath(track.trackPath, newX, newY);
+          if(!onTrack){
+            car.speed *= 0.9;
+          }
+        }
+      }
+
+      if(car.chatBubbleTimer > 0) {
+        car.chatBubbleTimer--;
+      } else {
+        car.chatBubble = "";
+      }
+
+      if(car.hitCount >= 4){
+        car.destroyed = true;
+        car.chatBubble = "Boom!";
+        car.chatBubbleTimer = 100;
+      }
+    }
+
+    // --- UPDATE BULLETS ---
+    for(let i = bullets.length - 1; i >= 0; i--){
+      let bullet = bullets[i];
+      bullet.x += Math.cos(bullet.angle) * bullet.speed;
+      bullet.y += Math.sin(bullet.angle) * bullet.speed;
+      bullet.lifetime--;
+      if(bullet.lifetime <= 0 || bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height){
+        bullets.splice(i, 1);
+        continue;
+      }
+      for(let car of cars){
+        if(car.destroyed) continue;
+        if(car === bullet.shooter) continue;
+        let dx = car.x - bullet.x;
+        let dy = car.y - bullet.y;
+        if(Math.hypot(dx, dy) < 15){
+          car.hitCount++;
+          car.chatBubble = "Ouch!";
+          car.chatBubbleTimer = 100;
+          bullets.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    resolveCollisions();
+
+    let alive = cars.filter(c => !c.destroyed);
+    if(alive.length === 1){
+      raceFinished = true;
+      winner = alive[0];
+    }
+  }
+
+  // --- DRAW FUNCTION ---
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'green';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'gray';
+    ctx.fill(track.trackPath, 'evenodd');
+
+    // Draw water features.
+    for(let wf of waterFeatures){
+      ctx.fillStyle = 'blue';
+      ctx.fill(wf.path);
+    }
+
+    // Draw bottomless pits.
+    for(let pit of bottomlessPits){
+      ctx.fillStyle = 'black';
+      ctx.fill(pit.path);
+    }
+
+    // Draw bullets.
+    for(let bullet of bullets){
+      ctx.beginPath();
+      ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'orange';
+      ctx.fill();
+    }
+
+    // Draw cars.
+    for(let car of cars){
+      if(car.destroyed) continue;
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+      ctx.fillStyle = car.color;
+      const L = car.height;
+      const W = car.width;
+      ctx.beginPath();
+      ctx.moveTo(L/2, 0);
+      ctx.lineTo(0, -W/2);
+      ctx.lineTo(-L/2, -W/2);
+      ctx.lineTo(-L/2, W/2);
+      ctx.lineTo(0, W/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Draw chat bubble.
+      if(car.chatBubbleTimer > 0 && car.chatBubble){
+        ctx.save();
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        let text = car.chatBubble;
+        let padding = 4;
+        let textWidth = ctx.measureText(text).width;
+        let bubbleWidth = textWidth + padding * 2;
+        let bubbleHeight = 16 + padding * 2;
+        let bubbleX = car.x;
+        let bubbleY = car.y - car.height/2 - 30;
+        ctx.fillStyle = "white";
+        ctx.strokeStyle = "black";
+        function roundRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+        roundRect(ctx, bubbleX - bubbleWidth/2, bubbleY - bubbleHeight/2, bubbleWidth, bubbleHeight, 5);
+        ctx.fillStyle = "black";
+        ctx.fillText(text, bubbleX, bubbleY);
+        ctx.restore();
+      }
+    }
+
+    if(raceFinished && winner){
+      ctx.fillStyle = 'white';
+      ctx.font = '48px sans-serif';
+      ctx.textAlign = 'center';
+      let msg = winner.isPlayer ? "You Win!" : "AI Wins!";
+      ctx.fillText(msg, canvas.width/2, canvas.height/2);
+    }
+  }
+})();
+</script>
+</body>
+</html>
