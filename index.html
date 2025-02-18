@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Growing & Shrinking Spinning Square, Gamepad & Emoji Controls, Explosion on Death</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    /* Timer styling */
+    #timer {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    /* Reset button styling */
+    #resetButton {
+      position: absolute;
+      top: calc(50% + 60px);
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 24px;
+      padding: 10px 20px;
+      cursor: pointer;
+      display: none;
+    }
+    /* Mobile control buttons styling (using arrow emojis) */
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 10;
+    }
+    #controls .row {
+      margin: 5px 0;
+    }
+    #controls button {
+      width: 60px;
+      height: 60px;
+      font-size: 32px;
+      margin: 0 10px;
+      border-radius: 10px;
+      border: none;
+      background: #333;
+      color: white;
+      opacity: 0.8;
+    }
+    #controls button:active {
+      background: #555;
+    }
+  </style>
+</head>
+<body>
+  <!-- Timer display -->
+  <div id="timer">0.0</div>
+  <canvas id="canvas"></canvas>
+  <!-- Reset button (hidden by default) -->
+  <button id="resetButton"></button>
+  <!-- Mobile controls using arrow emojis -->
+  <div id="controls">
+    <div class="row">
+      <button id="btnUp">⬆️</button>
+    </div>
+    <div class="row">
+      <button id="btnLeft">⬅️</button>
+      <button id="btnDown">⬇️</button>
+      <button id="btnRight">➡️</button>
+    </div>
+  </div>
+  <script>
+    (function() {
+      "use strict";
+
+      // Create the AudioContext.
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      // Resume audio on any user interaction.
+      function resumeAudio() {
+        if (audioContext.state === "suspended") {
+          audioContext.resume();
+        }
+      }
+      window.addEventListener("click", resumeAudio);
+      window.addEventListener("touchstart", resumeAudio);
+      const canvas = document.getElementById("canvas");
+      canvas.addEventListener("mousedown", resumeAudio);
+      canvas.addEventListener("touchstart", resumeAudio);
+
+      // ---- Explosion Sound Function (Deeper, Rumbly, and Louder) ----
+      function playExplosion() {
+        const duration = 0.4;
+        const sampleRate = audioContext.sampleRate;
+        const bufferSize = sampleRate * duration;
+        const buffer = audioContext.createBuffer(1, bufferSize, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noiseSource = audioContext.createBufferSource();
+        noiseSource.buffer = buffer;
+
+        const filter = audioContext.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(150, audioContext.currentTime);
+        filter.Q.value = 1;
+
+        const gainNode = audioContext.createGain();
+        gainNode.gain.setValueAtTime(5.0, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+        noiseSource.connect(filter);
+        filter.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        noiseSource.start();
+        noiseSource.stop(audioContext.currentTime + duration);
+      }
+      // ---- End Explosion Sound Function ----
+
+      // ---- Gamepad Polling Function ----
+      function pollGamepad() {
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        if (gamepads[0]) {
+          const gp = gamepads[0];
+          const threshold = 0.2;
+          // Override WASD keys based on left stick:
+          keys.w = gp.axes[1] < -threshold;
+          keys.s = gp.axes[1] > threshold;
+          keys.a = gp.axes[0] < -threshold;
+          keys.d = gp.axes[0] > threshold;
+        }
+      }
+      // ---- End Gamepad Polling ----
+
+      // Grab DOM elements.
+      const ctx = canvas.getContext("2d");
+      const timerElem = document.getElementById("timer");
+      const resetButton = document.getElementById("resetButton");
+      const btnUp = document.getElementById("btnUp");
+      const btnLeft = document.getElementById("btnLeft");
+      const btnDown = document.getElementById("btnDown");
+      const btnRight = document.getElementById("btnRight");
+
+      // Array of 50 witty phrases for the reset button.
+      const wittyPhrases = [
+        "Try again, if you dare!",
+        "Restart your fate!",
+        "Back to the drawing board!",
+        "Give it another shot!",
+        "Reset and conquer!",
+        "RIP? No, respawn!",
+        "One more time!",
+        "Shake it off, and try again!",
+        "Do-over time!",
+        "Revive your hopes!",
+        "Rise, reset, and retry!",
+        "Press here for a new chance!",
+        "Reset: because you can do it better!",
+        "Game over? Not for long!",
+        "Breathe, reset, and battle on!",
+        "Revive your inner champion!",
+        "New life: loading...",
+        "Time to retry your destiny!",
+        "Awaken your gaming spirit!",
+        "Don't worry, be retry!",
+        "Refresh your luck!",
+        "Oops! Let's do that again.",
+        "Rethink, reset, restart!",
+        "Don't give up! Try again!",
+        "Restart: the universe awaits.",
+        "Hit reset and change your fate!",
+        "Back in the game!",
+        "Game over? More like game redo!",
+        "Reset your destiny!",
+        "Better luck this time!",
+        "Reboot your adventure!",
+        "Another round, another chance!",
+        "Time for a do-over!",
+        "Press me for redemption!",
+        "I promise, this time you'll win!",
+        "Reset: because perseverance pays off!",
+        "Not over yet – try again!",
+        "One more go for glory!",
+        "Restart: defy the odds!",
+        "Your comeback starts here!",
+        "Reset and rewrite your story!",
+        "Restart – because life is too short to lose!",
+        "Better yet, try again!",
+        "Reload and redeem!",
+        "Press to reclaim victory!",
+        "Reset now, dominate later!",
+        "Time to flip the script!",
+        "Reboot, revive, repeat!",
+        "Make your comeback now!",
+        "Press reset, become legend!"
+      ];
+
+      // Game state flag.
+      let gameOver = false;
+
+      // Square size settings.
+      const initialSquareSize = 300;
+      const minSquareSize = 200;
+      const shrinkRate = 18;
+      let currentSquareSize = initialSquareSize;
+      let halfSquare = currentSquareSize / 2;
+      let squareMargin = halfSquare * Math.SQRT2;
+      let isShrinking = true;
+
+      // Rotation parameters.
+      let squareAngle = 0;
+      const rotationSpeed = Math.PI / 4;
+
+      // The square's moving center.
+      const squareCenter = { x: 0, y: 0 };
+      let squareVX = 100;
+      let squareVY = 80;
+
+      // Red ball parameters.
+      const ball = {
+        radius: 10,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0
+      };
+      const movementSpeed = 250;
+
+      // WASD keys state.
+      const keys = { w: false, a: false, s: false, d: false };
+
+      // Keyboard event listeners.
+      window.addEventListener("keydown", function(e) {
+        switch (e.key.toLowerCase()) {
+          case "w": keys.w = true; break;
+          case "a": keys.a = true; break;
+          case "s": keys.s = true; break;
+          case "d": keys.d = true; break;
+        }
+      });
+      window.addEventListener("keyup", function(e) {
+        switch (e.key.toLowerCase()) {
+          case "w": keys.w = false; break;
+          case "a": keys.a = false; break;
+          case "s": keys.s = false; break;
+          case "d": keys.d = false; break;
+        }
+      });
+
+      // Function to add touch/mouse events for mobile control buttons.
+      function addButtonEvents(button, keyName) {
+        button.addEventListener("touchstart", function(e) {
+          keys[keyName] = true;
+          e.preventDefault();
+        });
+        button.addEventListener("touchend", function(e) {
+          keys[keyName] = false;
+          e.preventDefault();
+        });
+        button.addEventListener("mousedown", function(e) {
+          keys[keyName] = true;
+        });
+        button.addEventListener("mouseup", function(e) {
+          keys[keyName] = false;
+        });
+        button.addEventListener("touchcancel", function(e) {
+          keys[keyName] = false;
+          e.preventDefault();
+        });
+      }
+
+      // Map mobile buttons to WASD keys.
+      addButtonEvents(btnUp, "w");
+      addButtonEvents(btnLeft, "a");
+      addButtonEvents(btnDown, "s");
+      addButtonEvents(btnRight, "d");
+
+      // Resize canvas and recenter objects.
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        squareCenter.x = canvas.width / 2;
+        squareCenter.y = canvas.height / 2;
+        ball.x = squareCenter.x;
+        ball.y = squareCenter.y;
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      // Timing variables.
+      let startTime = performance.now();
+      let lastTime = performance.now();
+
+      // Main animation loop.
+      function animate(time) {
+        const dt = (time - lastTime) / 1000;
+        lastTime = time;
+
+        // Poll gamepad input (if connected).
+        pollGamepad();
+
+        // Update timer.
+        const elapsedSeconds = (time - startTime) / 1000;
+        timerElem.textContent = elapsedSeconds.toFixed(1);
+
+        // Update square size (shrinking/growing cycle).
+        if (isShrinking) {
+          currentSquareSize -= shrinkRate * dt;
+          if (currentSquareSize <= minSquareSize) {
+            currentSquareSize = minSquareSize;
+            isShrinking = false;
+          }
+        } else {
+          currentSquareSize += shrinkRate * dt;
+          if (currentSquareSize >= initialSquareSize) {
+            currentSquareSize = initialSquareSize;
+            isShrinking = true;
+            squareVX *= 2;
+            squareVY *= 2;
+          }
+        }
+        halfSquare = currentSquareSize / 2;
+        squareMargin = halfSquare * Math.SQRT2;
+
+        // Check for game over.
+        if (gameOver) {
+          drawScene();
+          ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "white";
+          ctx.font = "80px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("YOU DIED", canvas.width / 2, canvas.height / 2);
+          resetButton.textContent = wittyPhrases[Math.floor(Math.random() * wittyPhrases.length)];
+          resetButton.style.display = "block";
+          return;
+        }
+
+        // Update square position.
+        squareCenter.x += squareVX * dt;
+        squareCenter.y += squareVY * dt;
+        if (squareCenter.x - squareMargin < 0) {
+          squareCenter.x = squareMargin;
+          squareVX = -squareVX;
+        } else if (squareCenter.x + squareMargin > canvas.width) {
+          squareCenter.x = canvas.width - squareMargin;
+          squareVX = -squareVX;
+        }
+        if (squareCenter.y - squareMargin < 0) {
+          squareCenter.y = squareMargin;
+          squareVY = -squareVY;
+        } else if (squareCenter.y + squareMargin > canvas.height) {
+          squareCenter.y = canvas.height - squareMargin;
+          squareVY = -squareVY;
+        }
+
+        // Update ball velocity (WASD, mobile, or gamepad).
+        ball.vx = 0;
+        ball.vy = 0;
+        if (keys.w) ball.vy -= movementSpeed;
+        if (keys.s) ball.vy += movementSpeed;
+        if (keys.a) ball.vx -= movementSpeed;
+        if (keys.d) ball.vx += movementSpeed;
+
+        // Rotate the square.
+        squareAngle += rotationSpeed * dt;
+
+        // Update ball position.
+        ball.x += ball.vx * dt;
+        ball.y += ball.vy * dt;
+
+        // Check collision: transform ball position to square's local coords.
+        const dx = ball.x - squareCenter.x;
+        const dy = ball.y - squareCenter.y;
+        const cosA = Math.cos(squareAngle);
+        const sinA = Math.sin(squareAngle);
+        const localX = dx * cosA + dy * sinA;
+        const localY = -dx * sinA + dy * cosA;
+        if (
+          localX + ball.radius > halfSquare ||
+          localX - ball.radius < -halfSquare ||
+          localY + ball.radius > halfSquare ||
+          localY - ball.radius < -halfSquare
+        ) {
+          if (!gameOver) {
+            playExplosion();
+          }
+          gameOver = true;
+        }
+
+        drawScene();
+        requestAnimationFrame(animate);
+      }
+
+      // Draw scene function.
+      function drawScene() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(squareCenter.x, squareCenter.y);
+        ctx.rotate(squareAngle);
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(-halfSquare, -halfSquare, currentSquareSize, currentSquareSize);
+        ctx.restore();
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Reset game state.
+      function resetGame() {
+        gameOver = false;
+        resetButton.style.display = "none";
+        startTime = performance.now();
+        lastTime = performance.now();
+        currentSquareSize = initialSquareSize;
+        halfSquare = currentSquareSize / 2;
+        squareMargin = halfSquare * Math.SQRT2;
+        isShrinking = true;
+        squareCenter.x = canvas.width / 2;
+        squareCenter.y = canvas.height / 2;
+        squareAngle = 0;
+        squareVX = 100;
+        squareVY = 80;
+        ball.x = squareCenter.x;
+        ball.y = squareCenter.y;
+        ball.vx = 0;
+        ball.vy = 0;
+        keys.w = keys.a = keys.s = keys.d = false;
+        requestAnimationFrame(animate);
+      }
+
+      resetButton.addEventListener("click", resetGame);
+
+      // Start animation.
+      requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>
